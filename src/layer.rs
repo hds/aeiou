@@ -74,6 +74,10 @@ impl Layer {
     // Self kept because it will be needed with pending changes.
     #[allow(clippy::unused_self)]
     fn write_event(&self, fmt_event: &mut FmtEvent) {
+//        match fmt_event.kind() {
+//            EventKind::Unknown | EventKind::Waker | EventKind::SpanEvent(SpanKind::Spawn) => {}
+//            _ => return,
+//        }
         println!("{}", fmt_event.formatted());
     }
 
@@ -93,31 +97,49 @@ impl Layer {
             return;
         };
 
-        let formatted_scope = ctx
+        let (formatted_scope, depth) = ctx
             .span_scope(id)
             .map(|scope| self.formatted_scope(scope))
             .unwrap_or_default();
-        let mut fmt_event =
-            FmtEvent::new_span_event(now, fmt_span, span.metadata(), &formatted_scope, message);
+        let mut fmt_event = FmtEvent::new_span_event(
+            now,
+            fmt_span,
+            span.metadata(),
+            &formatted_scope,
+            depth,
+            message,
+        );
 
         self.write_event(&mut fmt_event);
     }
 
     // Self kept because it will be needed with pending changes.
     #[allow(clippy::unused_self)]
-    fn formatted_scope<S>(&self, scope: tracing_subscriber::registry::Scope<'_, S>) -> String
+    fn formatted_scope<S>(
+        &self,
+        scope: tracing_subscriber::registry::Scope<'_, S>,
+    ) -> (String, usize)
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
         let mut formatted_scope = String::new();
+        let mut depth = 0;
+        let mut indent = 2;
         for span in scope.from_root() {
             let extensions = span.extensions();
             let span = extensions
                 .get::<FmtSpan>()
                 .expect("cannot get fields for in-scope span. This is a bug!");
-            formatted_scope.push_str(&format!("{span} ", span = span.formatted()));
+            formatted_scope.push_str(&format!(
+                "\n{:indent$} {} {span} ",
+                "",
+                span.with_color("\u{2937}"),
+                span = span.formatted()
+            ));
+            indent += 2;
+            depth += 1;
         }
-        formatted_scope
+        (formatted_scope, depth)
     }
 }
 
@@ -166,12 +188,12 @@ where
         let mut fields = FmtFields::new_event();
         event.record(&mut fields);
 
-        let formatted_scope = ctx
+        let (formatted_scope, depth) = ctx
             .event_scope(event)
             .map(|scope| self.formatted_scope(scope))
             .unwrap_or_default();
 
-        let mut fmt_event = FmtEvent::new(now, event.metadata(), &formatted_scope, fields);
+        let mut fmt_event = FmtEvent::new(now, event.metadata(), &formatted_scope, depth, fields);
         self.write_event(&mut fmt_event);
     }
 

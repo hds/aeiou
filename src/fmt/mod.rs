@@ -8,13 +8,13 @@ use color::{
     RED, RED_BOLD, TURQUOISE, TURQUOISE_BOLD, YELLOW, YELLOW_BOLD,
 };
 
-enum FmtFieldsKind {
+pub(crate) enum FmtFieldsKind {
     Span,
     Event(Option<String>),
 }
 
 #[derive(Clone)]
-enum SpanKind {
+pub(crate) enum SpanKind {
     Unknown,
     Spawn,
     Resource,
@@ -80,6 +80,11 @@ impl FmtSpan {
     pub(crate) fn formatted(&self) -> &str {
         &self.formatted
     }
+
+    pub(crate) fn with_color<S: Into<String>>(&self, s: S) -> String {
+        let (color, _bold) = self.kind.get_colors();
+        s.into().color(color).to_string()
+    }
 }
 
 pub(crate) struct FmtEvent<'a> {
@@ -87,6 +92,7 @@ pub(crate) struct FmtEvent<'a> {
     kind: EventKind,
     meta: &'a Metadata<'a>,
     scope: &'a str,
+    depth: usize,
     fields: FmtFields,
 }
 
@@ -95,6 +101,7 @@ impl<'a> FmtEvent<'a> {
         timestamp: DateTime<Utc>,
         meta: &'a Metadata<'a>,
         scope: &'a str,
+        depth: usize,
         fields: FmtFields,
     ) -> Self {
         let kind = match meta.target() {
@@ -110,6 +117,7 @@ impl<'a> FmtEvent<'a> {
             kind,
             meta,
             scope,
+            depth,
             fields,
         }
     }
@@ -119,6 +127,7 @@ impl<'a> FmtEvent<'a> {
         span: &FmtSpan,
         meta: &'a Metadata<'a>,
         scope: &'a str,
+        depth: usize,
         message: String,
     ) -> Self {
         Self {
@@ -126,6 +135,7 @@ impl<'a> FmtEvent<'a> {
             kind: EventKind::SpanEvent(span.kind.clone()),
             meta,
             scope,
+            depth,
             fields: FmtFields::new_message(message),
         }
     }
@@ -146,7 +156,7 @@ impl<'a> FmtEvent<'a> {
             .dimmed();
         if matches!(&self.kind, EventKind::SpanEvent(_)) {
             format!(
-                "{timestamp} {level:>5} {scope}{formatted}",
+                "{timestamp} {level:>5} {scope} {formatted}",
                 level = format_level(*self.meta.level()),
                 scope = self.scope,
                 formatted = self
@@ -157,8 +167,11 @@ impl<'a> FmtEvent<'a> {
                     .bold()
             )
         } else {
+            let indent = (self.depth + 1) * 2;
             format!(
-                "{timestamp} {level:>5} {scope}{target}: {formatted}",
+                "{timestamp} {level:>5} {scope}\n{:indent$} {} {target}: {formatted}",
+                "",
+                "\u{2937}".color(color),
                 level = format_level(*self.meta.level()),
                 scope = self.scope,
                 target = self.meta.target().color(bold).bold(),
@@ -179,7 +192,7 @@ fn format_level(level: tracing::Level) -> String {
     .to_string()
 }
 
-enum EventKind {
+pub(crate) enum EventKind {
     Unknown,
     Waker,
     PollOp,
@@ -278,6 +291,9 @@ impl FmtFields {
 
 impl Visit for FmtFields {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name().starts_with("loc.") {
+            return;
+        }
         self.fields
             .push((field.name().into(), format!("{value:?}")));
         self.dirty = true;
